@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <defs>
+    <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#00bcd4;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#008ba3;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  <!-- Radio waves -->
+  <path d="M50 70 Q30 50 50 30 Q70 50 50 70" fill="none" stroke="url(#grad)" stroke-width="3"/>
+  <path d="M50 80 Q20 50 50 20 Q80 50 50 80" fill="none" stroke="url(#grad)" stroke-width="2" opacity="0.7"/>
+  <path d="M50 90 Q10 50 50 10 Q90 50 50 90" fill="none" stroke="url(#grad)" stroke-width="1.5" opacity="0.4"/>
+  <!-- Antenna -->
+  <line x1="50" y1="50" x2="50" y2="95" stroke="url(#grad)" stroke-width="4" stroke-linecap="round"/>
+  <circle cx="50" cy="50" r="5" fill="url(#grad)"/>
+</svg>

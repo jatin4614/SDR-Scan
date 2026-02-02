@@ -1,0 +1,63 @@
+# RF Spectrum Monitor - Default Configuration
+
+app:
+  name: "RF Spectrum Monitor"
+  version: "1.0.0"
+
+database:
+  url: "sqlite:///./data/database/spectrum.db"
+  echo: false
+  pool_size: 5
+
+api:
+  host: "0.0.0.0"
+  port: 8000
+  reload: false
+  workers: 4
+
+sdr:
+  default_device: "rtlsdr"
+  sample_rate: 2400000  # Hz
+  gain: 20              # dB
+  integration_time: 0.1 # seconds
+  fft_size: 1024
+
+  # HackRF specific settings
+  hackrf:
+    lna_gain: 16
+    vga_gain: 20
+    sample_rate: 8000000
+
+  # RTL-SDR specific settings
+  rtlsdr:
+    gain_mode: "auto"
+    ppm_correction: 0
+
+gps:
+  mode: "manual"  # manual, gpsd, mock
+  gpsd:
+    host: "localhost"
+    port: 2947
+  mock:
+    default_lat: 28.6139
+    default_lon: 77.2090
+
+scanning:
+  frequency_range:
+    min: 30000000     # 30 MHz
+    max: 6000000000   # 6 GHz
+  max_sweep_time: 60  # seconds
+  min_step_size: 1000 # Hz
+  default_bandwidth: 200000  # Hz
+
+export:
+  directory: "./data/exports"
+  formats:
+    - csv
+    - geopackage
+  max_file_size: 1073741824  # 1GB
+
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "./logs/spectrum_monitor.log"

@@ -1,0 +1,108 @@
+# RF Spectrum Monitor - Docker Compose Configuration
+# Usage:
+#   Development: docker-compose up
+#   Production:  docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+
+version: '3.8'
+
+services:
+  # Frontend - React application served by Nginx
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: /api
+    container_name: rf-monitor-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    networks:
+      - rf-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Backend - FastAPI application
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: rf-monitor-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=sqlite:///./data/database/spectrum.db
+      - CORS_ORIGINS=http://localhost,http://localhost:80,http://localhost:5173
+      - LOG_LEVEL=INFO
+      - GPS_MODE=mock
+    volumes:
+      # Persist database and exports
+      - rf-data:/app/data
+      # USB access for SDR devices (Linux host)
+      - /dev/bus/usb:/dev/bus/usb
+    # Required for USB device access
+    privileged: true
+    networks:
+      - rf-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  # Redis for task queue (optional - for background jobs)
+  redis:
+    image: redis:7-alpine
+    container_name: rf-monitor-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - rf-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Celery worker for background tasks (optional)
+  celery-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: rf-monitor-celery
+    command: celery -A core.task_queue worker --loglevel=info
+    environment:
+      - DATABASE_URL=sqlite:///./data/database/spectrum.db
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    volumes:
+      - rf-data:/app/data
+    depends_on:
+      - redis
+      - backend
+    networks:
+      - rf-network
+    restart: unless-stopped
+    profiles:
+      - with-celery
+
+networks:
+  rf-network:
+    driver: bridge
+
+volumes:
+  rf-data:
+    driver: local
+  redis-data:
+    driver: local
