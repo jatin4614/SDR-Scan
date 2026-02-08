@@ -314,6 +314,9 @@ class HackRFDevice(SDRDevice):
         """
         Detect all connected HackRF devices.
 
+        Attempts index-based enumeration if the library supports it,
+        otherwise falls back to opening the default device.
+
         Returns:
             List of device info dictionaries
         """
@@ -321,21 +324,38 @@ class HackRFDevice(SDRDevice):
             return []
 
         devices = []
-        try:
-            # HackRF library typically handles single device
-            device = hackrf.HackRF()
-            try:
-                serial = device.serial_number
-            except Exception:
-                serial = "hackrf_unknown"
 
-            devices.append({
-                'type': 'hackrf',
-                'serial': serial,
-                'name': 'HackRF One'
-            })
-            device.close()
-        except Exception as e:
-            logger.debug(f"No HackRF found: {e}")
+        # Try library-level enumeration if available
+        try:
+            device_list = hackrf.HackRF.enumerate() if hasattr(hackrf.HackRF, 'enumerate') else None
+        except Exception:
+            device_list = None
+
+        if device_list:
+            for i, info in enumerate(device_list):
+                serial = getattr(info, 'serial_number', None) or f'hackrf_{i}'
+                devices.append({
+                    'type': 'hackrf',
+                    'serial': serial,
+                    'name': f'HackRF One #{i}',
+                    'index': i,
+                })
+        else:
+            # Fallback: try opening the default device
+            try:
+                device = hackrf.HackRF()
+                try:
+                    serial = device.serial_number
+                except Exception:
+                    serial = "hackrf_unknown"
+
+                devices.append({
+                    'type': 'hackrf',
+                    'serial': serial,
+                    'name': 'HackRF One',
+                })
+                device.close()
+            except Exception as e:
+                logger.debug(f"No HackRF found: {e}")
 
         return devices

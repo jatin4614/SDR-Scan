@@ -106,9 +106,15 @@ export function useWebSocket(path, options = {}) {
 
 /**
  * Hook for spectrum WebSocket
+ *
+ * @param {number|null} deviceId - DB device ID to stream from
+ * @param {object} options - Additional options
  */
-export function useSpectrumWebSocket(options = {}) {
-  return useWebSocket('/ws/spectrum', options)
+export function useSpectrumWebSocket(deviceId, options = {}) {
+  const path = deviceId
+    ? `/ws/spectrum?device_id=${deviceId}`
+    : '/ws/spectrum'
+  return useWebSocket(path, { ...options, autoConnect: !!deviceId })
 }
 
 /**

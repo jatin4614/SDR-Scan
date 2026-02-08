@@ -56,6 +56,9 @@ from .scanner import (
     create_scanner,
 )
 
+# Registry
+from .registry import DeviceRegistry, get_device_registry
+
 __all__ = [
     # Base
     'SDRDevice',
@@ -84,7 +87,40 @@ __all__ = [
     'SpectrumScanner',
     'ScannerConfig',
     'create_scanner',
+    'get_scanner',
+
+    # Registry
+    'DeviceRegistry',
+    'get_device_registry',
 ]
+
+
+_default_scanner: tuple = None
+
+
+def get_scanner(device_type: str = 'mock', device_id: str = None) -> 'SpectrumScanner':
+    """
+    Get a ready-to-use scanner instance.
+
+    Creates a device and scanner, opens the device, and returns the scanner.
+    Caches the result so subsequent calls return the same scanner.
+
+    For multi-device support, prefer using get_device_registry().acquire(db_id)
+    instead. This function is kept for backward compatibility.
+
+    Args:
+        device_type: Type of device ('mock', 'rtlsdr', 'hackrf')
+        device_id: Optional device identifier
+
+    Returns:
+        SpectrumScanner instance with an open device
+    """
+    global _default_scanner
+    if _default_scanner is None:
+        device, scanner = create_scanner(device_type, device_id)
+        device.open()
+        _default_scanner = (device, scanner)
+    return _default_scanner[1]
 
 
 def detect_all_devices() -> list:
@@ -122,7 +158,13 @@ def get_device(device_type: str, device_id=None) -> SDRDevice:
         SDR device instance (not opened)
     """
     if device_type == 'mock':
-        return MockSDRDevice(device_id=device_id or 'mock_0')
+        # Extract scenario from device_id (e.g. 'mock_fm_broadcast' → 'fm_broadcast')
+        scenario = 'fm_broadcast'
+        if device_id and device_id.startswith('mock_'):
+            scenario_key = device_id[len('mock_'):]
+            if scenario_key in MockSDRDevice.get_available_scenarios():
+                scenario = scenario_key
+        return MockSDRDevice(device_id=device_id or 'mock_0', scenario=scenario)
     elif device_type == 'rtlsdr':
         if not RTLSDR_AVAILABLE:
             raise ImportError("RTL-SDR support not available (pyrtlsdr not installed)")

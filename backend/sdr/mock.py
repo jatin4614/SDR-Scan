@@ -304,14 +304,20 @@ class MockSDRDevice(SDRDevice):
         """
         Return list of available mock devices.
 
-        Always returns one mock device - useful for testing device detection.
+        Returns one mock device per scenario (excluding 'empty'),
+        allowing multi-device testing without hardware.
         """
-        return [{
-            'type': 'mock',
-            'device_id': 'mock_sdr_0',
-            'name': 'Mock SDR (Simulator)',
-            'scenarios': list(SCENARIOS.keys())
-        }]
+        devices = []
+        for key, scenario in SCENARIOS.items():
+            if key == 'empty':
+                continue
+            devices.append({
+                'type': 'mock',
+                'device_id': f'mock_{key}',
+                'name': f'Mock SDR - {scenario.name}',
+                'scenario': key,
+            })
+        return devices
 
     @staticmethod
     def get_available_scenarios() -> List[str]:

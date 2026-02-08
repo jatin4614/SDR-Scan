@@ -8,11 +8,12 @@ import asyncio
 import json
 from typing import Dict, Set, Optional, Any
 from datetime import datetime
+import numpy as np
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, Query
 from loguru import logger
 
 from ...core import get_survey_manager, GPSMode
-from ...sdr import get_scanner, ScanParameters
+from ...sdr import get_scanner, get_device_registry, ScanParameters
 
 
 router = APIRouter()
@@ -106,6 +107,7 @@ async def spectrum_websocket(
     WebSocket endpoint for real-time spectrum streaming.
 
     Streams spectrum data at regular intervals for live visualization.
+    Requires a device_id (DB primary key) to select which SDR to use.
 
     Messages sent:
     - type: "spectrum" - Spectrum data with frequencies and power values
@@ -113,19 +115,37 @@ async def spectrum_websocket(
     - type: "status" - Connection status updates
 
     Messages received:
-    - type: "config" - Update streaming parameters
+    - type: "config" - Update streaming parameters (including device_id switch)
     - type: "pause" - Pause streaming
     - type: "resume" - Resume streaming
     """
     await manager.connect(websocket, 'spectrum')
 
+    registry = get_device_registry()
     streaming = True
     current_device_id = device_id
     current_center_freq = center_freq or 100e6
     current_bandwidth = bandwidth
     current_interval = max(0.1, min(5.0, interval))  # Clamp between 0.1 and 5 seconds
+    scanner = None
 
     try:
+        # Acquire device if specified in query params
+        if current_device_id is not None:
+            try:
+                scanner = await asyncio.to_thread(registry.acquire, current_device_id)
+            except Exception as e:
+                logger.error(f"Failed to acquire device {current_device_id}: {e}")
+                await manager.send_to(websocket, {
+                    'type': 'error',
+                    'message': f'Failed to open device {current_device_id}: {e}'
+                })
+        else:
+            await manager.send_to(websocket, {
+                'type': 'error',
+                'message': 'No device_id specified. Send a config message with device_id to start streaming.'
+            })
+
         # Send initial status
         await manager.send_to(websocket, {
             'type': 'status',
@@ -137,9 +157,6 @@ async def spectrum_websocket(
                 'interval': current_interval
             }
         })
-
-        # Get scanner
-        scanner = get_scanner()
 
         while True:
             # Check for incoming messages (non-blocking)
@@ -159,8 +176,24 @@ async def spectrum_websocket(
                         current_bandwidth = float(message['bandwidth'])
                     if 'interval' in message:
                         current_interval = max(0.1, min(5.0, float(message['interval'])))
-                    if 'device_id' in message:
-                        current_device_id = message['device_id']
+
+                    # Handle device switch
+                    if 'device_id' in message and message['device_id'] is not None:
+                        new_device_id = int(message['device_id'])
+                        if new_device_id != current_device_id:
+                            # Release old device
+                            if current_device_id is not None:
+                                await asyncio.to_thread(registry.release, current_device_id)
+                            current_device_id = new_device_id
+                            try:
+                                scanner = await asyncio.to_thread(registry.acquire, current_device_id)
+                            except Exception as e:
+                                logger.error(f"Failed to acquire device {current_device_id}: {e}")
+                                scanner = None
+                                await manager.send_to(websocket, {
+                                    'type': 'error',
+                                    'message': f'Failed to open device {current_device_id}: {e}'
+                                })
 
                     await manager.send_to(websocket, {
                         'type': 'status',
@@ -192,7 +225,7 @@ async def spectrum_websocket(
                 pass
 
             # Stream spectrum data if active
-            if streaming:
+            if streaming and scanner:
                 try:
                     # Get spectrum data
                     spectrum_data = await asyncio.to_thread(
@@ -208,6 +241,7 @@ async def spectrum_websocket(
                             'timestamp': datetime.utcnow().isoformat(),
                             'center_freq': current_center_freq,
                             'bandwidth': current_bandwidth,
+                            'device_id': current_device_id,
                             'frequencies': spectrum_data['frequencies'],
                             'power_dbm': spectrum_data['power_dbm'],
                             'noise_floor': spectrum_data.get('noise_floor'),
@@ -226,6 +260,12 @@ async def spectrum_websocket(
     except Exception as e:
         logger.error(f"Spectrum WebSocket error: {e}")
     finally:
+        # Release device on disconnect
+        if current_device_id is not None:
+            try:
+                await asyncio.to_thread(registry.release, current_device_id)
+            except Exception as e:
+                logger.warning(f"Error releasing device on disconnect: {e}")
         await manager.disconnect(websocket, 'spectrum')
 
 
@@ -235,25 +275,31 @@ def _get_spectrum_snapshot(scanner, center_freq: float, bandwidth: float) -> Opt
         params = ScanParameters(
             start_freq=center_freq - bandwidth / 2,
             stop_freq=center_freq + bandwidth / 2,
-            step_size=bandwidth / 1024,  # 1024 points
-            bandwidth=bandwidth / 10,
+            bin_size=bandwidth / 1024,  # 1024 points
             integration_time=0.05
         )
 
         result = scanner.single_sweep(params)
-        if result and result.data:
+        if result and len(result.frequencies) > 0:
+            # Estimate noise floor from data
+            sorted_power = np.sort(result.power_dbm)
+            noise_floor = float(np.median(sorted_power[:max(1, len(sorted_power) // 10)]))
+
+            # Detect peaks
+            peaks = scanner.detect_peaks(result.frequencies, result.power_dbm)
+
             # Convert numpy arrays to lists for JSON serialization
             return {
-                'frequencies': result.data[0].frequencies.tolist(),
-                'power_dbm': result.data[0].power_dbm.tolist(),
-                'noise_floor': result.noise_floor_dbm,
+                'frequencies': result.frequencies.tolist(),
+                'power_dbm': result.power_dbm.tolist(),
+                'noise_floor': noise_floor,
                 'peaks': [
                     {
                         'frequency': p.frequency,
                         'power_dbm': p.power_dbm,
                         'bandwidth': p.bandwidth
                     }
-                    for p in (result.peaks or [])[:10]  # Limit to top 10 peaks
+                    for p in (peaks or [])[:10]  # Limit to top 10 peaks
                 ]
             }
     except Exception as e:

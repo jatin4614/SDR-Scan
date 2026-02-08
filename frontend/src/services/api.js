@@ -77,6 +77,11 @@ export const api = {
     return response.data
   },
 
+  async getRegistryStatus() {
+    const response = await apiClient.get('/devices/registry/status')
+    return response.data
+  },
+
   // ============ Surveys ============
 
   async getSurveys(params = {}) {

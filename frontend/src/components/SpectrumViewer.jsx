@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import {
   Box,
   Paper,
@@ -11,9 +11,10 @@ import {
   Tab,
   Divider,
 } from '@mui/material'
-import Plot from 'react-plotly.js'
+import Plot from './Plot'
 import { useStore } from '../store/useStore'
-import { useWebSocket } from '../hooks/useWebSocket'
+import { useSpectrumWebSocket } from '../hooks/useWebSocket'
+import { api } from '../services/api'
 import SpectrumControls from './SpectrumControls'
 import WaterfallPlot from './WaterfallPlot'
 import SignalAnnotation from './SignalAnnotation'
@@ -27,6 +28,7 @@ function SpectrumViewer() {
     setSpectrumSettings,
     setSpectrumData,
     devices,
+    setDevices,
     selectedDevice,
     setSelectedDevice,
     signals,
@@ -38,7 +40,29 @@ function SpectrumViewer() {
   const [peakHoldData, setPeakHoldData] = useState(null)
   const [playbackMode, setPlaybackMode] = useState(false)
 
-  const { isConnected, sendMessage } = useWebSocket('/ws/spectrum')
+  const { isConnected, sendMessage } = useSpectrumWebSocket(selectedDevice?.id)
+
+  // Load devices on mount if the list is empty
+  useEffect(() => {
+    if (devices.length === 0) {
+      api.getDevices().then(res => {
+        const list = res.devices || []
+        setDevices(list)
+        if (!selectedDevice && list.length > 0) {
+          setSelectedDevice(list[0])
+        }
+      }).catch(console.error)
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Stop streaming when device changes
+  const prevDeviceId = useRef(selectedDevice?.id)
+  useEffect(() => {
+    if (prevDeviceId.current !== selectedDevice?.id && spectrumSettings.isStreaming) {
+      setSpectrumSettings({ isStreaming: false })
+    }
+    prevDeviceId.current = selectedDevice?.id
+  }, [selectedDevice?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Handle settings change
   const handleSettingsChange = useCallback((newSettings) => {
@@ -55,28 +79,34 @@ function SpectrumViewer() {
       setSpectrumSettings({ isStreaming: false })
       sendMessage({ type: 'pause' })
     } else {
+      if (!selectedDevice?.id || !isConnected) {
+        console.warn('Cannot start streaming: no device selected or not connected')
+        return
+      }
       setSpectrumSettings({ isStreaming: true })
       sendMessage({
         type: 'config',
+        device_id: selectedDevice?.id,
         center_freq: spectrumSettings.centerFrequency,
         bandwidth: spectrumSettings.bandwidth,
         interval: spectrumSettings.updateInterval,
       })
       sendMessage({ type: 'resume' })
     }
-  }, [spectrumSettings, setSpectrumSettings, sendMessage])
+  }, [spectrumSettings, setSpectrumSettings, sendMessage, selectedDevice, isConnected])
 
   // Handle apply settings
   const handleApplySettings = useCallback((settings) => {
     if (spectrumSettings.isStreaming) {
       sendMessage({
         type: 'config',
+        device_id: selectedDevice?.id,
         center_freq: settings.centerFrequency,
         bandwidth: settings.span,
         interval: settings.updateRate,
       })
     }
-  }, [spectrumSettings.isStreaming, sendMessage])
+  }, [spectrumSettings.isStreaming, sendMessage, selectedDevice])
 
   // Update peak hold data
   useEffect(() => {
@@ -195,10 +225,11 @@ function SpectrumViewer() {
     if (spectrumSettings.isStreaming) {
       sendMessage({
         type: 'config',
+        device_id: selectedDevice?.id,
         center_freq: annotation.frequency,
       })
     }
-  }, [setSpectrumSettings, spectrumSettings.isStreaming, sendMessage])
+  }, [setSpectrumSettings, spectrumSettings.isStreaming, sendMessage, selectedDevice])
 
   // Handle playback data from history component
   const handlePlaybackData = useCallback((measurements) => {

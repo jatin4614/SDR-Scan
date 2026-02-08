@@ -15,6 +15,7 @@ import time
 from ..core.config import settings
 from ..core.task_queue import get_task_manager
 from ..core.survey_manager import get_survey_manager
+from ..sdr import get_device_registry
 from ..storage.database import init_db
 from .routes import devices, surveys, spectrum, export, websocket
 
@@ -44,6 +45,11 @@ async def lifespan(app: FastAPI):
     if survey_manager.get_state():
         logger.info("Stopping active survey...")
         survey_manager.stop_survey()
+
+    # Close all open SDR devices
+    device_registry = get_device_registry()
+    device_registry.close_all()
+    logger.info("Device registry shutdown complete")
 
     # Shutdown task manager
     task_manager.shutdown(wait=True)

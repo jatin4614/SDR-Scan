@@ -26,6 +26,7 @@ from ...sdr import (
     RTLSDR_AVAILABLE,
     HACKRF_AVAILABLE,
     get_device as get_sdr_device,
+    get_device_registry,
 )
 
 router = APIRouter()
@@ -79,7 +80,7 @@ async def detect_devices():
     for d in detected:
         devices.append(DetectedDevice(
             device_type=DeviceType(d['type']),
-            serial_number=d.get('serial'),
+            serial_number=d.get('serial') or d.get('device_id'),
             name=d.get('name', f"{d['type']} device"),
             index=d.get('index')
         ))
@@ -128,6 +129,17 @@ async def create_device(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
         )
+
+
+@router.get("/registry/status")
+async def get_device_registry_status():
+    """
+    Get status of the device registry.
+
+    Returns which devices are currently open and managed by the registry.
+    """
+    registry = get_device_registry()
+    return {"open_devices": registry.get_status()}
 
 
 @router.get("/{device_id}", response_model=DeviceResponse)
